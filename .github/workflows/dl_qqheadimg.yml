@@ -1,0 +1,31 @@
+name: Download and Replace Head Image (Weekly)
+
+on:
+  schedule:
+    # 每周一 UTC 00:00 运行（北京时间 08:00）
+    - cron: '0 0 * * 1'
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  update-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download original image
+        run: curl -L -o headimg.tmp "http://q.qlogo.cn/headimg_dl?dst_uin=2961563989&spec=640&img_type=jpg"
+
+      - name: Ensure target directory exists
+        run: mkdir -p img
+
+      - name: Rename and replace
+        run: mv headimg.tmp img/headimg.jpg
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add img/headimg.jpg
+          git commit -m "Weekly auto update headimg.jpg" || echo "No changes to commit"
+          git push
