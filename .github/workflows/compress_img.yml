@@ -1,4 +1,4 @@
-name: Compress JPG/PNG and Delete Originals
+name: Compress JPG/PNG (>3MB) and Delete Originals
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jpegoptim optipng
 
-      - name: Compress JPG/PNG from img/unzip to img/ and delete originals
+      - name: Process JPG/PNG from img/unzip to img/ (compress if >3MB)
         run: |
           mkdir -p img
 
@@ -30,17 +30,32 @@ jobs:
             extension="${filename##*.}"
             ext_lower=$(echo "$extension" | tr '[:upper:]' '[:lower:]')
 
+            # 获取文件大小（字节）
+            size_bytes=$(stat -c%s "$file")
+            size_mb=$(echo "scale=2; $size_bytes / 1048576" | bc)
+            echo "File: $file, Size: ${size_mb} MB"
+
             case "$ext_lower" in
               jpg|jpeg)
+                # 确定输出文件名（统一为 .jpg）
                 output="img/${filename%.*}.jpg"
-                echo "Processing JPEG: $file -> $output"
-                # --strip-all 去除元数据, -m 90 质量90%, --dest 指定输出目录
-                jpegoptim --strip-all --all-progressive -m 90 "$file" --dest="img/"
+                if (( $(echo "$size_mb > 3" | bc -l) )); then
+                  echo "Compressing JPEG (size > 3MB)"
+                  jpegoptim --strip-all --all-progressive -m 90 "$file" --dest="img/"
+                else
+                  echo "Copying JPEG without compression (size <= 3MB)"
+                  cp "$file" "$output"
+                fi
                 ;;
               png)
                 output="img/$filename"
-                echo "Processing PNG: $file -> $output"
-                optipng -o2 -out "$output" "$file"
+                if (( $(echo "$size_mb > 3" | bc -l) )); then
+                  echo "Compressing PNG (size > 3MB)"
+                  optipng -o2 -out "$output" "$file"
+                else
+                  echo "Copying PNG without compression (size <= 3MB)"
+                  cp "$file" "$output"
+                fi
                 ;;
               *)
                 echo "Skipping non-JPG/PNG: $file"
@@ -48,12 +63,12 @@ jobs:
                 ;;
             esac
 
-            # 压缩成功后删除原始文件
+            # 删除源文件（无论是否压缩）
             if [ -f "$output" ]; then
               rm -f "$file"
               echo "Deleted original: $file"
             else
-              echo "Compression failed for $file, keeping original"
+              echo "Processing failed for $file, keeping original"
             fi
           done
 
@@ -62,5 +77,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add img/ img/unzip/
-          git commit -m "Auto compress JPG/PNG and delete originals" || echo "No changes to commit"
+          git commit -m "Auto process JPG/PNG: compress if >3MB, else copy" || echo "No changes to commit"
           git push
