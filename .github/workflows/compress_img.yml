@@ -1,4 +1,4 @@
-name: Compress JPG/PNG (>3MB) and Delete Originals
+name: Compress JPG/PNG (>3MB) with Apt Cache
 
 on:
   push:
@@ -16,7 +16,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 缓存 apt 包（deb 文件）
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        id: cache-apt
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-jpegoptim-optipng
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
       - name: Install compression tools
+        # 只有当缓存未命中时才真正执行安装（但即使命中，install 命令也会瞬间完成）
         run: |
           sudo apt-get update
           sudo apt-get install -y jpegoptim optipng
@@ -30,14 +41,12 @@ jobs:
             extension="${filename##*.}"
             ext_lower=$(echo "$extension" | tr '[:upper:]' '[:lower:]')
 
-            # 获取文件大小（字节）
             size_bytes=$(stat -c%s "$file")
             size_mb=$(echo "scale=2; $size_bytes / 1048576" | bc)
             echo "File: $file, Size: ${size_mb} MB"
 
             case "$ext_lower" in
               jpg|jpeg)
-                # 确定输出文件名（统一为 .jpg）
                 output="img/${filename%.*}.jpg"
                 if (( $(echo "$size_mb > 3" | bc -l) )); then
                   echo "Compressing JPEG (size > 3MB)"
@@ -63,7 +72,6 @@ jobs:
                 ;;
             esac
 
-            # 删除源文件（无论是否压缩）
             if [ -f "$output" ]; then
               rm -f "$file"
               echo "Deleted original: $file"
@@ -77,5 +85,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add img/ img/unzip/
-          git commit -m "Auto process JPG/PNG: compress if >3MB, else copy" || echo "No changes to commit"
+          git commit -m "Auto process JPG/PNG: compress if >3MB (cached apt)" || echo "No changes to commit"
           git push
