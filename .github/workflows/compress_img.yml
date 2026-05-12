@@ -1,4 +1,4 @@
-name: Compress JPG/PNG (>3MB) with Apt Cache
+name: Compress JPG/PNG with Adaptive Compression
 
 on:
   push:
@@ -16,23 +16,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 缓存 apt 包（deb 文件）
       - name: Cache apt packages
         uses: actions/cache@v4
         id: cache-apt
         with:
           path: /var/cache/apt/archives
           key: ${{ runner.os }}-apt-jpegoptim-optipng
-          restore-keys: |
-            ${{ runner.os }}-apt-
 
       - name: Install compression tools
-        # 只有当缓存未命中时才真正执行安装（但即使命中，install 命令也会瞬间完成）
         run: |
           sudo apt-get update
           sudo apt-get install -y jpegoptim optipng
 
-      - name: Process JPG/PNG from img/unzip to img/ (compress if >3MB)
+      - name: Process JPG/PNG with size-based compression
         run: |
           mkdir -p img
 
@@ -48,21 +44,46 @@ jobs:
             case "$ext_lower" in
               jpg|jpeg)
                 output="img/${filename%.*}.jpg"
-                if (( $(echo "$size_mb > 3" | bc -l) )); then
-                  echo "Compressing JPEG (size > 3MB)"
-                  jpegoptim --strip-all --all-progressive -m 90 "$file" --dest="img/"
+                # 根据大小选择 JPEG 质量
+                if (( $(echo "$size_mb > 15" | bc -l) )); then
+                  quality=65
+                  echo "Large JPEG (>15MB) → quality $quality"
+                elif (( $(echo "$size_mb > 8" | bc -l) )); then
+                  quality=75
+                  echo "Medium JPEG (8-15MB) → quality $quality"
+                elif (( $(echo "$size_mb > 3" | bc -l) )); then
+                  quality=85
+                  echo "Normal JPEG (3-8MB) → quality $quality"
                 else
-                  echo "Copying JPEG without compression (size <= 3MB)"
+                  quality=90
+                  echo "Small JPEG (≤3MB) → quality $quality (copy without recompress?)"
+                fi
+                # 只有 >3MB 才压缩，否则直接复制
+                if (( $(echo "$size_mb > 3" | bc -l) )); then
+                  jpegoptim --strip-all --all-progressive -m "$quality" "$file" --dest="img/"
+                else
                   cp "$file" "$output"
                 fi
                 ;;
               png)
                 output="img/$filename"
-                if (( $(echo "$size_mb > 3" | bc -l) )); then
-                  echo "Compressing PNG (size > 3MB)"
-                  optipng -o2 -out "$output" "$file"
+                # PNG 根据大小选择优化级别（级别越高越慢但压缩率更高）
+                if (( $(echo "$size_mb > 15" | bc -l) )); then
+                  level=7
+                  echo "Large PNG (>15MB) → optipng -o$level (very slow)"
+                elif (( $(echo "$size_mb > 8" | bc -l) )); then
+                  level=5
+                  echo "Medium PNG (8-15MB) → optipng -o$level"
+                elif (( $(echo "$size_mb > 3" | bc -l) )); then
+                  level=3
+                  echo "Normal PNG (3-8MB) → optipng -o$level"
                 else
-                  echo "Copying PNG without compression (size <= 3MB)"
+                  level=2
+                  echo "Small PNG (≤3MB) → optipng -o$level (copy without recompress?)"
+                fi
+                if (( $(echo "$size_mb > 3" | bc -l) )); then
+                  optipng -o"$level" -out "$output" "$file"
+                else
                   cp "$file" "$output"
                 fi
                 ;;
@@ -85,5 +106,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add img/ img/unzip/
-          git commit -m "Auto process JPG/PNG: compress if >3MB (cached apt)" || echo "No changes to commit"
+          git commit -m "Adaptive compress JPG/PNG by size" || echo "No changes to commit"
           git push
